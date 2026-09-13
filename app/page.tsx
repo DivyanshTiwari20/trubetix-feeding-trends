@@ -1,69 +1,227 @@
-import Image from "next/image";
+'use client';
+
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { useChat } from '@ai-sdk/react';
+import { DefaultChatTransport } from 'ai';
+import { Languages, HelpCircle } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { AppSidebar } from '@/components/layout/AppSidebar';
+import { AppHeader } from '@/components/layout/AppHeader';
+import { ChatMessage } from '@/components/chat/ChatMessage';
+import { ChatInput } from '@/components/chat/ChatInput';
+import { ChatWelcome } from '@/components/chat/ChatWelcome';
 
 export default function Home() {
+  const [chats, setChats] = useState<any[]>([]);
+  const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  const activeChatIdRef = useRef<string | null>(null);
+  const [input, setInput] = useState('');
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [deepThinking, setDeepThinking] = useState(false);
+  const deepThinkingRef = useRef(false);
+  const [showExtendedThinking, setShowExtendedThinking] = useState(false);
+
+  const fetchChats = async () => {
+    try {
+      const r = await fetch('/api/chats');
+      if (r.ok) setChats(await r.json());
+    } catch { }
+  };
+
+  useEffect(() => {
+    fetchChats();
+  }, []);
+
+  useEffect(() => {
+    activeChatIdRef.current = activeChatId;
+  }, [activeChatId]);
+
+  useEffect(() => {
+    deepThinkingRef.current = deepThinking;
+  }, [deepThinking]);
+
+  const transport = useMemo(
+    () =>
+      new DefaultChatTransport({
+        api: '/api/chat',
+        fetch: async (url: any, options: any) => {
+          let body: any = {};
+          try {
+            body = JSON.parse((options?.body as string) || '{}');
+          } catch { }
+          body.chatId = activeChatIdRef.current;
+          body.deepThinking = deepThinkingRef.current;
+          const res = await fetch(url as string, {
+            ...options,
+            body: JSON.stringify(body),
+          } as any);
+          if (!res.ok) {
+            const j = await res.json().catch(() => ({}));
+            throw new Error(j?.error ?? `Request failed (${res.status})`);
+          }
+          const newId = res.headers.get('X-Chat-Id');
+          if (newId && !activeChatIdRef.current) {
+            activeChatIdRef.current = newId;
+            setActiveChatId(newId);
+          }
+          setTimeout(fetchChats, 500);
+          setTimeout(fetchChats, 2500);
+          return res;
+        },
+      } as any),
+    []
+  );
+
+  const chat = useChat({
+    transport,
+    onError: (err: any) => {
+      console.error('chat error', err);
+    },
+  } as any);
+
+  const { messages, sendMessage, status, setMessages, addToolResult, addToolOutput, error } = chat as any;
+
+  const isLoading = status === 'streaming' || status === 'submitted';
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'instant' as any });
+  }, [messages, isLoading]);
+
+  useEffect(() => {
+    if (deepThinking && isLoading) {
+      setShowExtendedThinking(true);
+    } else if (!isLoading && showExtendedThinking) {
+      const t = setTimeout(() => setShowExtendedThinking(false), 2200);
+      return () => clearTimeout(t);
+    }
+  }, [isLoading, deepThinking, showExtendedThinking]);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!input.trim()) return;
+    const pending: any = messages
+      .flatMap((m: any) => m.parts ?? [])
+      .find((p: any) => p.type === 'tool-ask_user_for_confirmation' && (p.state === 'call' || p.state === 'input-available'));
+    if (pending) {
+      const toolCallId = pending.toolCallId;
+      const cancelPayload = { entities: pending.input?.entities ?? pending.args?.entities ?? [], range: pending.input?.range ?? pending.args?.range ?? '7d', cancelled: true };
+      try { (addToolOutput as any)?.({ toolCallId, output: cancelPayload }); } catch { }
+      try { (addToolResult as any)?.({ toolCallId, result: cancelPayload }); } catch { }
+      try { (addToolResult as any)?.(toolCallId, cancelPayload); } catch { }
+    }
+    sendMessage({ text: input });
+    setInput('');
+  };
+
+  const handleNewChat = () => {
+    setActiveChatId(null);
+    activeChatIdRef.current = null;
+    setMessages([]);
+  };
+
+  const handleSelectChat = async (id: string) => {
+    setActiveChatId(id);
+    activeChatIdRef.current = id;
+    try {
+      const r = await fetch(`/api/chats/${id}`);
+      if (!r.ok) return;
+      const dbMessages: any[] = await r.json();
+      const uiMessages = dbMessages.map((m: any) => ({
+        id: m.id,
+        role: m.role as 'user' | 'assistant',
+        parts: m.parts ?? [{ type: 'text', text: m.content }],
+        content: m.content,
+      }));
+      setMessages(uiMessages as any);
+    } catch { }
+  };
+
+  const handleDeleteChat = async (id: string) => {
+    try {
+      const r = await fetch(`/api/chats/${id}`, { method: 'DELETE' });
+      if (!r.ok) return;
+      setChats((prev: any[]) => prev.filter((c) => c.id !== id));
+      if (activeChatId === id) {
+        setActiveChatId(null);
+        activeChatIdRef.current = null;
+        setMessages([]);
+      }
+    } catch { }
+  };
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="flex h-[100dvh] h-screen w-full overflow-hidden bg-[#F8F7FA] font-sans">
+      <div className="flex h-full w-full overflow-hidden">
+        {sidebarOpen && (
+          <AppSidebar
+            onClose={() => setSidebarOpen(false)}
+            onNewChat={handleNewChat}
+            chats={chats}
+            activeChatId={activeChatId}
+            onSelectChat={handleSelectChat}
+            onDeleteChat={handleDeleteChat}
+          />
+        )}
+        <div className="flex flex-1 flex-col overflow-hidden bg-white">
+          <AppHeader sidebarOpen={sidebarOpen} onOpenSidebar={() => setSidebarOpen(true)} />
+          <div className="flex flex-1 flex-col overflow-hidden">
+            <div className="flex-1 overflow-y-auto bg-white">
+              {error && (
+                <div className="mx-auto max-w-[780px] px-4 pt-4">
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+                    <div className="text-sm font-semibold text-amber-900">We hit a temporary limit</div>
+                    <div className="text-sm text-amber-800 mt-1">{(error as any)?.message ?? 'Gemini quota exceeded (20/day free). Please retry in ~45s or try a smaller date range.'}</div>
+                  </div>
+                </div>
+              )}
+              {messages.length === 0 ? (
+                <ChatWelcome
+                  input={input}
+                  onInputChange={setInput}
+                  onSubmit={handleSubmit}
+                  onPromptClick={(t) => sendMessage({ text: t })}
+                  isLoading={isLoading}
+                  deepThinking={deepThinking}
+                  onDeepThinkingChange={setDeepThinking}
+                />
+              ) : (
+                <div className="mx-auto max-w-[780px] space-y-4 px-4 py-6 md:px-6">
+                  {messages.map((m: any, idx: number) => (
+                    <ChatMessage
+                      key={m.id}
+                      message={m as any}
+                      isLoading={isLoading && idx === messages.length - 1}
+                      addToolResult={(toolCallId: string, result: any) => {
+                        try {
+                          try { (addToolOutput as any)?.({ toolCallId, output: result }); } catch { }
+                          try { (addToolResult as any)?.({ toolCallId, result }); } catch { }
+                          try { (addToolResult as any)?.({ toolCallId, output: result }); } catch { }
+                        } catch (e) {
+                          console.error('addToolResult error:', e);
+                        }
+                      }}
+                    />
+                  ))}
+                  {(isLoading || showExtendedThinking) && (
+                    <div className="flex items-center gap-2 px-4 text-[13px] text-[#9CA3AF]">
+                      <div className="h-2 w-2 animate-pulse rounded-full bg-[#A78BFA]" />
+                      {deepThinking || showExtendedThinking ? 'Thinking deeper...' : 'Thinking...'}
+                    </div>
+                  )}
+                  <div ref={bottomRef} />
+                </div>
+              )}
+            </div>
+            {messages.length > 0 && (
+              <div className="bg-white p-4">
+                <ChatInput value={input} onChange={setInput} onSubmit={handleSubmit} isLoading={isLoading} variant="compact" deepThinking={deepThinking} onDeepThinkingChange={setDeepThinking} />
+              </div>
+            )}
+
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+      </div>
     </div>
   );
 }
