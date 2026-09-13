@@ -30,10 +30,33 @@ export default function Home() {
 
   useEffect(() => {
     fetchChats();
+    try {
+      const saved = typeof window !== 'undefined' ? localStorage.getItem('activeChatId') : null;
+      if (saved) {
+        setActiveChatId(saved);
+        activeChatIdRef.current = saved;
+        (async () => {
+          try {
+            const r = await fetch(`/api/chats/${saved}`);
+            if (r.ok) {
+              const dbMessages: any[] = await r.json();
+              const uiMessages = dbMessages.map((m: any) => ({
+                id: m.id,
+                role: m.role as 'user' | 'assistant',
+                parts: m.parts ?? [{ type: 'text', text: m.content }],
+                content: m.content,
+              }));
+              setMessages(uiMessages as any);
+            }
+          } catch {}
+        })();
+      }
+    } catch {}
   }, []);
 
   useEffect(() => {
     activeChatIdRef.current = activeChatId;
+    try { if (activeChatId) localStorage.setItem('activeChatId', activeChatId); else localStorage.removeItem('activeChatId'); } catch {}
   }, [activeChatId]);
 
   useEffect(() => {

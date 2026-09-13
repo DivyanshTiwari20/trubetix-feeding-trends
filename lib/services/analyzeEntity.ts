@@ -1,4 +1,5 @@
 import { newsAdapter } from '../adapters/news';
+import { webMentionsAdapter } from '../adapters/webMentions';
 import { calculateScore } from '../scoring';
 import { ScoreResult, NormalizedMention, Dossier } from '../types';
 import { generateObject } from 'ai';
@@ -68,6 +69,16 @@ export async function analyzeEntity(entity: string, range: '1d'|'7d'|'15d'|'30d'
     if (newsResult.status==='ok') mentions.push(...newsResult.mentions);
   } catch(e){
     const q=isQuotaError(e); if(q.hit) throw Object.assign(new Error(`QUOTA:${q.retryAfter}`),{isQuota:true, retryAfter:q.retryAfter});
+  }
+
+  // Fetch web/social mentions via Serper (if configured)
+  if (webMentionsAdapter.isConfigured()) {
+    try {
+      const webResult = await webMentionsAdapter.fetchSignal(entity, range);
+      if (webResult.status === 'ok') mentions.push(...webResult.mentions);
+    } catch (e) {
+      console.warn('webMentions adapter failed:', e instanceof Error ? e.message : e);
+    }
   }
 
   if (mentions.length===0) {

@@ -1,7 +1,7 @@
 export interface SignalAdapter {
   name: string;
   isConfigured(): boolean;
-  fetchSignal(entity: string, range: "1d" | "7d" | "15d" | "30d"): Promise<AdapterResult>;
+  fetchSignal(entity: string, range: "1d" | "7d" | "15d" | "30d", options?: { platform?: string }): Promise<AdapterResult>;
 }
 
 export type AdapterResult =
@@ -16,6 +16,7 @@ export interface NormalizedMention {
   publishedAt: string; // ISO date
   sentiment?: "positive" | "negative" | "neutral";
   sourceAuthority?: "tier1" | "tier2" | "tier3";
+  engagementSnippet?: string;
   raw: Record<string, unknown>;
 }
 

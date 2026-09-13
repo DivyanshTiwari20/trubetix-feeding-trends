@@ -17,12 +17,36 @@ Read this file before starting any task in this codebase. If you make an archite
 ## Data sourcing policy
 
 - No scraping, anywhere, of any platform, ever. All external data comes from:
-  1. Gemini Search grounding for news (`news.ts`)
-  2. Gemini Search grounding with explicit site-restricted queries for social platforms (`webMentions.ts`) — querying Google's index via Gemini, not the platforms' own servers
+  1. GNews API for news (`news.ts`), with Gemini Search grounding as fallback
+  2. Serper API (`google.serper.dev/search`) with site-restricted queries for social platforms (`webMentions.ts`) — querying Google's index via Serper, not the platforms' own servers
   3. Stub adapters for official paid APIs (`reddit.ts`, `twitter.ts`, `instagram.ts`, `seo.ts`), activated later only by adding real credentials to env vars
 - Social platforms live in one config array (`SOCIAL_PLATFORMS`) in `webMentions.ts` — adding or removing a platform is a one-line change, never a rearchitecture
 - User controls which platforms are included per query via a toggle UI; default is all platforms enabled
 - Every adapter's output is validated per individual mention via Zod. One malformed mention is dropped and logged — it never fails the whole batch or crashes the pipeline
+- If `SERPER_API_KEY` is missing or empty, `webMentions.ts` returns `coming_soon` — it does not silently fall back to Gemini grounding
+- Gemini is used ONLY for: sentiment/source-tier classification, dynamic topic generation, intent classification, chat conversation, and narrative writing. Gemini never does the actual searching
+
+## webMentions.ts query patterns
+
+- Each platform in `SOCIAL_PLATFORMS` gets a site-restricted Serper query: `"entity" site:reddit.com`
+- Date range via Serper's `tbs` parameter: `1d` → `qdr:d`, `7d` → `qdr:w`, `15d` → `qdr:w`, `30d` → `qdr:m`
+- `num: 10` results per platform, all platforms fetched in parallel via `Promise.allSettled`
+- Engagement snippet text (e.g. "4.8K+ likes") captured from Serper's `snippet` field and stored in `NormalizedMention.engagementSnippet`
+
+## Intent classification
+
+- 4-way classifier in `lib/services/classifyIntent.ts`: `casual_chat` | `volume_query` | `full_analysis` | `pdf_generation`
+- Returns `ambiguous` when confidence < 0.7 for volume_query/full_analysis — route asks user to clarify
+- Routing happens in `app/api/chat/route.ts` BEFORE any tools are invoked
+- Tools (ask_user_for_confirmation, execute_pipeline) are only included for `full_analysis` intent
+- PDF generation is always a separate, explicit ask — never auto-generated
+
+## Persona
+
+- Sharp, quick, a little playful in HOW it talks — never in WHAT the data says
+- Numbers, scores, and reputational findings are always precise and serious
+- Emoji: max 1-2 per reply, only when it genuinely adds tone, never on data
+- Length: crisp, no padding — if the answer is one line, give one line
 
 ## Scoring policy
 
@@ -74,3 +98,4 @@ Add a minimum access gate (shared password / basic auth middleware) before the a
 - [x] **Phase 8: Single-confirm fix + Gemini-only platform strategy — fixed double-confirm (correct addToolOutput shape + hidden form after result), fixed 1d range bug (ThinkingPanel shows confirmed range), added webMentions adapter via site: grounding, centralized SOCIAL_PLATFORMS in config.ts, no extra API keys**
 - [x] **Phase 9: Full 27-item PR Dossier — extended types with Dossier (1 identity → 27 evidence), upgraded analyzeEntity to generate dossier via Gemini grounded generateObject (handles, tier, SOV, sentiment, topics, risks, timeline, gaps, KPIs), rebuilt AnalysisReport as scalable 7-page modular dossier (cover/identity, media, social, actors, risk, strategy, evidence), selectable Summary(1p)/Full(7p)**
 - [x] **Phase 10: PDF Rendering Redesign — fixed pagination to continuous flow (no one-section-per-page), A4 48pt margins, hierarchy 26pt/16pt/13pt/10.5pt, minimal black/white + single purple accent, markdown bold/italic/links rendered via parser, compact header, compact hero, compact metrics, readable tables with wrapping, widow/orphan control, eliminated collisions/empty space**
+- [x] **Phase 11: Search Backend Swap + Smart Routing — swapped webMentions from Gemini grounding to Serper API, added 4-way intent classifier (casual_chat/volume_query/full_analysis/pdf_generation) with ambiguity handling, sharpened persona, PDF always explicit-ask-only, wired webMentions adapter into analyzeEntity pipeline**

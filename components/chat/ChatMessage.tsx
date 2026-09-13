@@ -1,10 +1,13 @@
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import { ThinkingPanel } from './ThinkingPanel';
 import { AnalysisForm } from './AnalysisForm';
 import { ScoreCard } from './ScoreCard';
+import { VolumeResults } from './VolumeResults';
 import { PdfDownloadButton } from '../pdf/PdfDownloadButton';
+import { Copy, Check } from 'lucide-react';
 
 interface ChatMessageProps {
   message: any;
@@ -13,23 +16,9 @@ interface ChatMessageProps {
 }
 
 export function ChatMessage({ message, isLoading, addToolResult }: ChatMessageProps) {
+  const [copiedUser, setCopiedUser] = useState(false);
   const isAi = message.role === 'assistant';
   const parts: any[] = message.parts ?? [];
-
-  const rawText = parts.length > 0
-    ? parts.filter((p: any) => p.type === 'text').map((p: any) => p.text).join('\n\n')
-    : (message.content ?? '');
-  const textContent = rawText
-    .replace(/<a[\s\S]*?<\/a>/gi, '')
-    .replace(/📥\s*Download PDF Report[\s\S]*?$/i, '')
-    .replace(/Download Report\s*\n?Get the complete raw dossier[\s\S]*/i, '')
-    .replace(/javascript:void\(0\)[^<]*/gi, '')
-    .trim();
-
-  const reasoningParts = parts.filter((p: any) => p.type === 'reasoning');
-  const thoughts = reasoningParts.length > 0
-    ? reasoningParts.map((p: any) => p.text ?? p.reasoning ?? '').join('\n\n')
-    : undefined;
 
   const toolParts: any[] = parts.filter((p: any) => p.type?.startsWith('tool-') || p.type === 'dynamic-tool');
   const legacyTools: any[] = message.toolInvocations ?? [];
@@ -44,13 +33,45 @@ export function ChatMessage({ message, isLoading, addToolResult }: ChatMessagePr
       }))
     : legacyTools;
 
+  const hasVolumeSuccess = toolInvocations.some((t: any) => t.toolName === 'execute_volume_query' && (t.state === 'result' || t.rawState === 'output-available') && t.result?.status === 'success');
   const hasToolCalls = toolInvocations.length > 0;
 
+  const rawText = hasVolumeSuccess ? '' : (parts.length > 0
+    ? parts.filter((p: any) => p.type === 'text').map((p: any) => p.text).join('\n\n')
+    : (message.content ?? ''));
+  const textContent = rawText
+    .replace(/<a[\s\S]*?<\/a>/gi, '')
+    .replace(/📥\s*Download PDF Report[\s\S]*?$/i, '')
+    .replace(/Download Report\s*\n?Get the complete raw dossier[\s\S]*/i, '')
+    .replace(/javascript:void\(0\)[^<]*/gi, '')
+    .replace(/\(Google-indexed estimate, not Meta internal exact\)/gi, '')
+    .replace(/\(Google-indexed[^)]*\)/gi, '')
+    .replace(/were indexed on Instagram/gi, 'were found on Instagram')
+    .replace(/\bindexed\b/gi, 'found')
+    .replace(/In the last[^]*?tap to verify\.?/gi, '')
+    .trim();
+
+  const reasoningParts = parts.filter((p: any) => p.type === 'reasoning');
+  const thoughts = reasoningParts.length > 0
+    ? reasoningParts.map((p: any) => p.text ?? p.reasoning ?? '').join('\n\n')
+    : undefined;
+
   if (!isAi) {
+    const handleCopyUser = async () => {
+      try { await navigator.clipboard.writeText(textContent || message.content || ''); setCopiedUser(true); setTimeout(()=>setCopiedUser(false), 1400); } catch {}
+    };
     return (
-      <div className="flex justify-end px-2 py-1.5">
-        <div className="max-w-[75%] rounded-[22px] bg-[#E8F0FE] px-5 py-2.5">
-          {textContent && <div className="whitespace-pre-wrap text-[14px] leading-6 text-[#1F2937]">{textContent}</div>}
+      <div className="flex justify-end px-2 py-1.5 group/user">
+        <div className="flex flex-col items-end gap-1 max-w-[75%]">
+          <div className="rounded-[22px] bg-[#E8F0FE] px-5 py-2.5">
+            {textContent && <div className="whitespace-pre-wrap text-[14px] leading-6 text-[#1F2937]">{textContent || message.content}</div>}
+            {!textContent && message.content && <div className="whitespace-pre-wrap text-[14px] leading-6 text-[#1F2937]">{message.content}</div>}
+          </div>
+          <div className="flex items-center gap-1 opacity-0 group-hover/user:opacity-100 transition-opacity pr-1">
+            <button onClick={handleCopyUser} aria-label="Copy" className="h-7 w-7 rounded-full bg-white border shadow-sm flex items-center justify-center hover:bg-muted">
+              {copiedUser ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5 text-muted-foreground" />}
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -62,7 +83,7 @@ export function ChatMessage({ message, isLoading, addToolResult }: ChatMessagePr
         <span className="text-[#7C3AED]">Trubetix AI</span>
       </div>
       
-      {(isLoading || thoughts || hasToolCalls) && (
+      {isLoading && (thoughts || hasToolCalls) && (
         <ThinkingPanel
           isLoading={isLoading || false}
           thoughts={thoughts}
@@ -118,6 +139,16 @@ export function ChatMessage({ message, isLoading, addToolResult }: ChatMessagePr
           );
         }
 
+        if (isResult && toolName === 'execute_volume_query') {
+          if (result?.status === 'error') {
+            return <div key={toolCallId} className="w-full rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">{result.error ?? 'Volume query failed.'}</div>;
+          }
+          const volResults = result?.results ?? [];
+          const volRange = args?.range ?? result?.range ?? '7d';
+          if (volResults.length === 0) return <div key={toolCallId} className="w-full rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">No volume results returned.</div>;
+          return <div key={toolCallId} className="w-full"><VolumeResults results={volResults} range={volRange} /></div>;
+        }
+
         if (isResult) {
           return null;
         }
@@ -146,6 +177,8 @@ export function ChatMessage({ message, isLoading, addToolResult }: ChatMessagePr
 
         return null;
       })}
+
+
     </div>
   );
 }
