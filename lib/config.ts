@@ -1,12 +1,5 @@
 import { Clock, Lightbulb, Files } from 'lucide-react';
-
-export const SOCIAL_PLATFORMS = [
-  { id: 'reddit', label: 'Reddit', site: 'reddit.com' },
-  { id: 'twitter', label: 'X/Twitter', site: 'x.com' },
-  { id: 'instagram', label: 'Instagram', site: 'instagram.com' },
-  { id: 'youtube', label: 'YouTube', site: 'youtube.com' },
-  { id: 'linkedin', label: 'LinkedIn', site: 'linkedin.com' },
-] as const;
+export { SOCIAL_PLATFORMS } from './config/platforms';
 
 export const PROMPT_CARDS = [
   {

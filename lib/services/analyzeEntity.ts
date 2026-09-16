@@ -89,14 +89,19 @@ export async function analyzeEntity(entity: string, range: '1d'|'7d'|'15d'|'30d'
   }
 
   try {
-    const payload = mentions.map((m,i)=>({id:i, title:m.title}));
-    const { object } = await generateObject({
-      model: google('models/gemini-3.5-flash'),
-      providerOptions:{ google:{ thinkingConfig:{includeThoughts:false, thinkingBudget:0}}} as any,
-      schema: z.object({ classifications: z.array(z.object({ id:z.number(), sentiment: z.enum(['positive','negative','neutral'])})) }),
-      prompt:`Classify sentiment of headlines about "${entity}": ${JSON.stringify(payload)}`,
-    });
-    mentions = mentions.map((m,i)=>({ ...m, sentiment: object.classifications.find(c=>c.id===i)?.sentiment||'neutral', sourceAuthority: getSourceAuthority(m.url)}));
+    const { analyzeConversation } = await import('./conversation');
+    const convo = await analyzeConversation(mentions, entity);
+    if (convo.classifications.size > 0) {
+      mentions = mentions.map((m,i)=>({ ...m, sentiment: (convo.classifications.get(i)?.sentiment as any) || 'neutral', sourceAuthority: getSourceAuthority(m.url)}));
+    } else {
+      const payload = mentions.map((m,i)=>({id:i, title:m.title, snippet:m.engagementSnippet ?? ''}));
+      const { object } = await generateObject({
+        model: google('models/gemini-3.5-flash-lite'),
+      schema: z.object({ classifications: z.array(z.object({ id:z.number(), sentiment: z.enum(['positive','negative','neutral','mixed'])})) }),
+        prompt:`Classify sentiment of headlines about "${entity}" using title+snippet: ${JSON.stringify(payload)}`,
+      });
+      mentions = mentions.map((m,i)=>({ ...m, sentiment: (object.classifications.find(c=>c.id===i)?.sentiment as any)||'neutral', sourceAuthority: getSourceAuthority(m.url)}));
+    }
   } catch(e:any){
     const q=isQuotaError(e); if(q.hit) { mentions = mentions.map(m=>({ ...m, sentiment:'neutral' as const, sourceAuthority:getSourceAuthority(m.url)})); }
     else mentions = mentions.map(m=>({ ...m, sentiment:'neutral' as const, sourceAuthority:getSourceAuthority(m.url)}));
@@ -109,8 +114,7 @@ export async function analyzeEntity(entity: string, range: '1d'|'7d'|'15d'|'30d'
   let analysis: ScoreResult['analysis'];
   try {
     const { object } = await generateObject({
-      model: google('models/gemini-3.5-flash'),
-      providerOptions:{ google:{ thinkingConfig:{includeThoughts:false, thinkingBudget:0}}} as any,
+      model: google('models/gemini-3.5-flash-lite'),
       schema: z.object({ dossier: dossierSchema, analysis: z.object({ executiveSummary: z.string(), sentimentNarrative: z.string(), keyThemes: z.array(z.string()).min(1).max(6), risks: z.array(z.string()).min(1).max(4), opportunities: z.array(z.string()).min(1).max(4), recommendations: z.array(z.string()).min(1).max(5), timelineInsights: z.string(), sourceAnalysis: z.string() }) }),
       prompt:`Senior PR analyst for "${entity}" ${range}. Score ${scored.compositeScore}/100 ${scored.label} breakdown ${JSON.stringify(scored.breakdown)} stats ${JSON.stringify(stats)} headlines: ${mentions.slice(0,8).map(m=>`[${m.sentiment}/${m.sourceAuthority}] ${m.title}`).join(' | ')}. Generate ONE concise dossier + analysis. Be specific, no filler. For handles use real URLs if known else "not verified".`,
     });

@@ -9,6 +9,7 @@ export interface ClassificationResult {
   confidence: number;
   entities: string[];
   range?: '1d' | '7d' | '15d' | '30d';
+  platforms?: string[];
 }
 
 const classificationSchema = z.object({
@@ -16,6 +17,7 @@ const classificationSchema = z.object({
   confidence: z.number().min(0).max(1),
   entities: z.array(z.string()),
   range: z.enum(['1d', '7d', '15d', '30d']).optional(),
+  platforms: z.array(z.string()).optional(),
 });
 
 /**
@@ -31,8 +33,7 @@ export async function classifyIntent(messages: { role: string; content: string }
     .join('\n\n');
   try {
     const { object } = await generateObject({
-      model: google('models/gemini-2.5-flash'),
-      providerOptions: { google: { thinkingConfig: { includeThoughts: false, thinkingBudget: 0 } } } as any,
+      model: google('models/gemini-3.5-flash-lite'),
       schema: classificationSchema,
       prompt: `Classify this user message into exactly ONE intent. Be precise.
 
@@ -44,11 +45,12 @@ INTENTS:
 
 RULES:
 - Extract entity names (brand, person, company) into the entities array. Empty if none mentioned.
-- Extract time range if mentioned: "today"/"last 24h" → 1d, "this week"/"last 7 days" → 7d, "last 15 days" → 15d, "this month"/"last 30 days" → 30d. Omit if not mentioned.
+- Extract time range if mentioned: "today"/"last 24h" → 1d, "this week"/"last 7 days" → 7d, "last 15 days" → 15d, "this month"/"last 30 days" → 30d. Default 7d if platform+entity present but range not stated (for lean pipeline).
+- Extract platforms if mentioned: instagram→["instagram"], x/twitter→["twitter"], youtube→["youtube"], reddit→["reddit"], linkedin→["linkedin"], news→["news"], web→["web"]. If user says "PR analysis" without platform, leave platforms empty (ambiguous). If user says "instagram analysis" or "for instagram" or just "instagram" anywhere, set platforms ["instagram"]. If user says "all platforms" or "overall", set platforms ["all"]. Comparison "X vs Y on Instagram" → platforms ["instagram"].
 - Set confidence between 0-1. Be honest — if it could be either volume_query or full_analysis, set confidence below 0.7.
 - "tell me about X" or "what about X" without specifying analysis depth → set confidence low (0.5-0.6) for whichever you lean toward.
 - "run the analysis" or "do the analysis" (without specifying full/deep vs quick) → set confidence low (0.5-0.6) so it routes to ambiguous.
-- If the latest user message is short (e.g. "then do the analysis", "yes", "do it"), LOOK AT THE CONVERSATION HISTORY to extract the entity they are referring to.
+- If the latest user message is short (e.g. "then do the analysis", "yes", "do it"), LOOK AT THE CONVERSATION HISTORY to extract the entity they are referring to. Also inherit platforms/range from history if not mentioned.
 
 Conversation History:
 ${conversationContext}`,

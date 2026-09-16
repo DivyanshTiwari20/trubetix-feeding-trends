@@ -8,6 +8,8 @@ import { ScoreCard } from './ScoreCard';
 import { VolumeResults } from './VolumeResults';
 import { PdfDownloadButton } from '../pdf/PdfDownloadButton';
 import { Copy, Check } from 'lucide-react';
+import { IntelligenceDashboard } from '../intelligence/IntelligenceDashboard';
+import { ComparisonView } from '../intelligence/ComparisonView';
 
 interface ChatMessageProps {
   message: any;
@@ -36,13 +38,18 @@ export function ChatMessage({ message, isLoading, addToolResult }: ChatMessagePr
   const hasVolumeSuccess = toolInvocations.some((t: any) => t.toolName === 'execute_volume_query' && (t.state === 'result' || t.rawState === 'output-available') && t.result?.status === 'success');
   const hasToolCalls = toolInvocations.length > 0;
 
-  const rawText = hasVolumeSuccess ? '' : (parts.length > 0
+  const hasPipeline = toolInvocations.some(t=> t.toolName==='execute_pipeline' && (t.state==='result' || t.rawState==='output-available') && t.result?.analyses?.length);
+  const rawText = hasVolumeSuccess || hasPipeline ? '' : (parts.length > 0
     ? parts.filter((p: any) => p.type === 'text').map((p: any) => p.text).join('\n\n')
     : (message.content ?? ''));
   const textContent = rawText
     .replace(/<a[\s\S]*?<\/a>/gi, '')
     .replace(/📥\s*Download PDF Report[\s\S]*?$/i, '')
     .replace(/Download Report\s*\n?Get the complete raw dossier[\s\S]*/i, '')
+    .replace(/Direct Answer[\s\S]*/i, '')
+    .replace(/Total Posts[\s\S]*/i, '')
+    .replace(/Supporting Evidence[\s\S]*/i, '')
+    .replace(/Methodology Note[\s\S]*/i, '')
     .replace(/javascript:void\(0\)[^<]*/gi, '')
     .replace(/\(Google-indexed estimate, not Meta internal exact\)/gi, '')
     .replace(/\(Google-indexed[^)]*\)/gi, '')
@@ -91,7 +98,8 @@ export function ChatMessage({ message, isLoading, addToolResult }: ChatMessagePr
         />
       )}
 
-      {textContent && (
+      {/* Data-first: tool dashboards before long text */}
+      {toolInvocations.length ? null : textContent && (
         <div className="prose prose-base dark:prose-invert max-w-none prose-p:my-3 prose-p:leading-7 prose-p:text-[15px] prose-p:text-[#1F2937] prose-strong:font-bold prose-strong:text-[#111827] prose-headings:font-semibold prose-headings:text-[#111827] prose-h2:text-[18px] prose-h3:text-[16px] prose-li:my-1 prose-li:text-[15px] prose-li:leading-7 prose-ul:my-3 prose-a:text-[#7C3AED] prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-sm">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{textContent}</ReactMarkdown>
         </div>
@@ -106,14 +114,24 @@ export function ChatMessage({ message, isLoading, addToolResult }: ChatMessagePr
         />
       )}
 
-      {toolInvocations.map((toolInvocation: any) => {
+      {toolInvocations.map((toolInvocation: any, tIdx: number) => {
         const { toolName, toolCallId, state, args, result, rawState } = toolInvocation;
+        const uniqueKey = `${message.id ?? 'msg'}-${toolCallId}-${tIdx}`;
         const isResult = state === 'result' || rawState === 'output-available' || rawState === 'output-error';
 
-        if (isResult && toolName === 'execute_pipeline') {
+        if (toolName === 'execute_pipeline') {
+          if (!isResult) {
+            return (
+              <div key={uniqueKey} className="w-full">
+                <div className="rounded-lg border bg-white p-4 flex items-center gap-2 text-sm">
+                  <span className="h-2 w-2 rounded-full bg-[#7C3AED] animate-pulse" /> Searching {args?.platforms?.join(', ') || 'indexed'} posts for {args?.entities?.join(', ') ?? 'entity'} ({args?.range ?? '7d'})…
+                </div>
+              </div>
+            );
+          }
           if (result?.status === 'quota_exceeded' || result?.status === 'error') {
             return (
-              <div key={toolCallId} className="w-full rounded-lg border border-amber-200 bg-amber-50 p-4">
+              <div key={uniqueKey} className="w-full rounded-lg border border-amber-200 bg-amber-50 p-4">
                 <div className="text-sm font-semibold text-amber-900">{result.status === 'quota_exceeded' ? 'Gemini quota hit — try again shortly' : 'Analysis failed'}</div>
                 <div className="mt-1 text-sm text-amber-800">{result.error ?? 'Pipeline failed. Please retry.'}</div>
                 {result.retryAfter && <div className="mt-2 text-xs text-amber-700">Retry after: {result.retryAfter} • Free tier is 20 requests/day per model.</div>}
@@ -121,54 +139,106 @@ export function ChatMessage({ message, isLoading, addToolResult }: ChatMessagePr
               </div>
             );
           }
+          const analyses: any[] = result?.analyses ?? [];
+          if (analyses.length) {
+            const showPdf = analyses.some((a:any)=> (a.intents??[]).includes('pdf_generation') || (a.question??'').toLowerCase().includes('pdf'));
+            const isComparison = analyses.length >= 2 && (analyses[0]?.intents?.includes('comparison') || (result?.question??'').toLowerCase().includes(' vs ') || (result?.question??'').toLowerCase().includes('compare'));
+            if (isComparison) {
+              return (
+                <div key={uniqueKey} className="w-full">
+                  <ComparisonView analyses={analyses} />
+                  {showPdf && <div className="flex justify-end mt-3"><PdfDownloadButton entity={analyses[0].entity} analysis={analyses[0]} range={analyses[0].range} /></div>}
+                </div>
+              );
+            }
+            return (
+              <div key={uniqueKey} className="w-full space-y-6">
+                {analyses.map((a:any, idx:number)=>(
+                  <div key={`${toolCallId}-${idx}`} className="space-y-3">
+                    <IntelligenceDashboard analysis={a} />
+                    {showPdf && <div className="flex justify-end"><PdfDownloadButton entity={a.entity} analysis={a} range={a.range} /></div>}
+                  </div>
+                ))}
+              </div>
+            );
+          }
           return (
-            <div key={toolCallId} className="w-full">
+            <div key={uniqueKey} className="w-full space-y-4">
               {result?.results?.map((res: any, idx: number) => (
                 <div key={`${toolCallId}-${idx}`}>
                   <ScoreCard entity={args?.entities?.[idx] ?? result?.entities?.[idx] ?? 'Unknown'} result={res} range={args?.range ?? result?.range ?? '7d'} />
-                  <div className="flex justify-end mt-2">
-                    <PdfDownloadButton
-                      entity={args?.entities?.[idx] ?? result?.entities?.[idx] ?? 'Unknown'}
-                      result={res}
-                      range={args?.range ?? result?.range ?? '7d'}
-                    />
-                  </div>
                 </div>
               ))}
+              {analyses.length === 0 && result?.results?.length === 0 ? <div className="text-sm text-muted-foreground">Analysis complete — no signals in window. Try broader range.</div> : null}
             </div>
           );
         }
 
         if (isResult && toolName === 'execute_volume_query') {
           if (result?.status === 'error') {
-            return <div key={toolCallId} className="w-full rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">{result.error ?? 'Volume query failed.'}</div>;
+            return <div key={uniqueKey} className="w-full rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">{result.error ?? 'Volume query failed.'}</div>;
           }
           const volResults = result?.results ?? [];
           const volRange = args?.range ?? result?.range ?? '7d';
-          if (volResults.length === 0) return <div key={toolCallId} className="w-full rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">No volume results returned.</div>;
-          return <div key={toolCallId} className="w-full"><VolumeResults results={volResults} range={volRange} /></div>;
+          if (volResults.length === 0) return <div key={uniqueKey} className="w-full rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">No volume results returned.</div>;
+          return <div key={uniqueKey} className="w-full"><VolumeResults results={volResults} range={volRange} /></div>;
         }
 
+        if (isResult && (toolName === 'aggregate_social_metrics' || toolName === 'discover_social_posts' || toolName === 'search_web_mentions' || toolName === 'search_news')) {
+          return null;
+        }
+        if (isResult && toolName === 'compare_periods') {
+          const deltas = result?.deltas ?? result;
+          const cur = result?.current;
+          const prev = result?.previous;
+          return (
+            <div key={uniqueKey} className="w-full space-y-3">
+              <div className="text-sm font-semibold">Period Comparison — deterministic</div>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="rounded border p-2"><div className="text-[11px] uppercase tracking-widest text-muted-foreground">Mentions growth</div><div className="text-sm font-bold">{deltas?.mentionsGrowth == null ? '—' : `${deltas.mentionsGrowth>0?'+':''}${deltas.mentionsGrowth}%`}</div></div>
+                <div className="rounded border p-2"><div className="text-[11px] uppercase tracking-widest text-muted-foreground">Positive shift</div><div className="text-sm font-bold">{deltas?.sentimentDelta == null ? '—' : `${deltas.sentimentDelta>0?'+':''}${deltas.sentimentDelta}%`}</div></div>
+                <div className="rounded border p-2"><div className="text-[11px] uppercase tracking-widest text-muted-foreground">Negative shift</div><div className="text-sm font-bold">{deltas?.negativeDelta == null ? '—' : `${deltas.negativeDelta>0?'+':''}${deltas.negativeDelta}%`}</div></div>
+              </div>
+              {cur && prev ? <div className="text-xs text-muted-foreground">Current {cur.indexedCount} indexed • Previous {prev.indexedCount} indexed • {deltas?.engagementDelta != null ? `Engagement ${deltas.engagementDelta}%` : 'Engagement unavailable'}</div> : null}
+              <div className="text-xs text-muted-foreground">Gemini explains drivers; numbers are backend-calculated.</div>
+            </div>
+          );
+        }
+        if (isResult && toolName === 'get_cached_analysis') {
+          if (result?.hit) return <div key={uniqueKey} className="w-full"><IntelligenceDashboard analysis={result.analysis} /><div className="text-xs text-muted-foreground mt-2">Served from cache (30m TTL) — refresh if you need latest.</div></div>;
+          return null;
+        }
         if (isResult) {
           return null;
         }
 
         if (toolName === 'ask_user_for_confirmation') {
           const isCompleted = isResult;
-          if (isCompleted) return null;
+          if (isCompleted) {
+            const conf = result as any;
+            if (conf?.cancelled) return <div key={uniqueKey} className="w-full rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">Cancelled — ask again to start a new scan.</div>;
+            return (
+              <div key={uniqueKey} className="w-full">
+                <div className="rounded-lg border bg-white p-3 flex items-center gap-2 text-sm">
+                  <span className="h-2 w-2 rounded-full bg-[#7C3AED] animate-pulse" /> Searching for {(result as any)?.entities?.join(', ') ?? args?.entities?.join(', ') ?? 'entity'} · {(result as any)?.range ?? args?.range ?? '7d'} {(result as any)?.platforms?.length ? `· ${(result as any).platforms.join(', ')}` : ''}…
+                </div>
+              </div>
+            );
+          }
           return (
             <AnalysisForm
-              key={toolCallId}
+              key={uniqueKey}
               initialEntities={args?.entities ?? []}
               initialRange={args?.range ?? '7d'}
-              onConfirm={(entities, range) => {
+              initialPlatforms={args?.platforms ?? []}
+              onConfirm={(entities, range, platforms) => {
                 if (addToolResult) {
-                  addToolResult(toolCallId, { entities, range });
+                  addToolResult(toolCallId, { entities, range, platforms: platforms ?? args?.platforms ?? [] });
                 }
               }}
               onCancel={() => {
                 if (addToolResult) {
-                  addToolResult(toolCallId, { entities: args?.entities ?? [], range: args?.range ?? '7d', cancelled: true });
+                  addToolResult(toolCallId, { entities: args?.entities ?? [], range: args?.range ?? '7d', platforms: args?.platforms ?? [], cancelled: true });
                 }
               }}
             />
@@ -177,7 +247,11 @@ export function ChatMessage({ message, isLoading, addToolResult }: ChatMessagePr
 
         return null;
       })}
-
+      {toolInvocations.length > 0 && textContent && !hasPipeline && (
+        <div className="prose prose-sm max-w-none prose-p:my-2 prose-p:leading-6 prose-p:text-sm prose-p:text-[#374151] mt-4 border-t pt-4">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{textContent}</ReactMarkdown>
+        </div>
+      )}
 
     </div>
   );

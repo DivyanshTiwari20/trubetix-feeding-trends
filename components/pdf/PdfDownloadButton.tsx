@@ -4,7 +4,7 @@ import { useState, useCallback } from 'react';
 import { pdf } from '@react-pdf/renderer';
 import { Button } from '@/components/ui/button';
 import { AnalysisReport } from '@/components/pdf/AnalysisReport';
-import { ScoreResult } from '@/lib/types';
+import { ScoreResult, Analysis } from '@/lib/types';
 import { Download, FileText } from 'lucide-react';
 import {
   Select,
@@ -16,11 +16,12 @@ import {
 
 interface PdfDownloadButtonProps {
   entity: string;
-  result: ScoreResult;
+  result?: ScoreResult;
+  analysis?: Analysis;
   range: string;
 }
 
-export function PdfDownloadButton({ entity, result, range }: PdfDownloadButtonProps) {
+export function PdfDownloadButton({ entity, result, analysis, range }: PdfDownloadButtonProps) {
   const [pageCount, setPageCount] = useState(2);
   const [generating, setGenerating] = useState(false);
 
@@ -31,6 +32,7 @@ export function PdfDownloadButton({ entity, result, range }: PdfDownloadButtonPr
         <AnalysisReport
           entity={entity}
           result={result}
+          analysisObj={analysis}
           range={range}
           pageCount={pageCount}
         />
@@ -49,7 +51,7 @@ export function PdfDownloadButton({ entity, result, range }: PdfDownloadButtonPr
     } finally {
       setGenerating(false);
     }
-  }, [entity, result, range, pageCount]);
+  }, [entity, result, analysis, range, pageCount]);
 
   return (
     <div className="flex items-center gap-2 mt-4">

@@ -35,8 +35,8 @@ export const newsAdapter: SignalAdapter = {
 
     try {
       const res: any = await generateText({
-        model: google('models/gemini-3.5-flash'),
-        providerOptions: { google: { useSearchGrounding: true, thinkingConfig: { includeThoughts: false, thinkingBudget: 0 } } } as any,
+        model: google('models/gemini-3.5-flash-lite'),
+        providerOptions: { google: { useSearchGrounding: true } } as any,
         prompt: `Search the web for recent news about "${entity}" from the past ${range}. List 5-10 headlines with publisher and date.`,
       });
 

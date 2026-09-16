@@ -1,6 +1,6 @@
 'use client';
 import { Document, Page, Text, View, StyleSheet, Link } from '@react-pdf/renderer';
-import { ScoreResult } from '@/lib/types';
+import { ScoreResult, Analysis } from '@/lib/types';
 
 const PURPLE = '#7C3AED';
 const INK = '#111827';
@@ -206,12 +206,24 @@ const Bullet = ({ children, icon = '•' }: any) => {
   );
 };
 
-export function AnalysisReport({ entity, result, range, pageCount }: { entity: string; result: ScoreResult; range: string; pageCount: number }) {
+export function AnalysisReport({ entity, result, range, pageCount, analysisObj }: { entity: string; result?: ScoreResult; range: string; pageCount: number; analysisObj?: Analysis }) {
   const now = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
   const rl = range === '1d' ? '24 Hours' : range === '7d' ? '7 Days' : range === '15d' ? '15 Days' : range === '30d' ? '30 Days' : range;
-  const a = result.analysis;
-  const d = result.dossier;
-  const st = result.stats;
+  const eff: ScoreResult | null = result ?? (analysisObj ? ({
+    compositeScore: analysisObj.prHealth?.score ?? 50,
+    label: (analysisObj.prHealth?.label ?? 'Mixed') as any,
+    breakdown: { sentimentScore: analysisObj.prHealth?.drivers.sentiment ?? 50, volumeScore: analysisObj.prHealth?.drivers.visibility ?? 50, trendScore: analysisObj.prHealth?.drivers.momentum ?? 50, authorityWeight: analysisObj.prHealth?.drivers.engagement ?? 50 },
+    topMentions: analysisObj.topMentions,
+    analysis: { executiveSummary: analysisObj.overview, sentimentNarrative: analysisObj.dataQuality.limitations.join(' '), keyThemes: analysisObj.narratives.map(n=>n.name), risks: analysisObj.risks, opportunities: [], recommendations: analysisObj.recommendations, timelineInsights: '', sourceAnalysis: '' },
+    dossier: undefined,
+    stats: { positive: analysisObj.metrics.sentimentCounts.positive, negative: analysisObj.metrics.sentimentCounts.negative, neutral: analysisObj.metrics.sentimentCounts.neutral, tier1: 0, tier2: 0, tier3: 0, total: analysisObj.metrics.indexedCount },
+  } as ScoreResult) : null);
+  if (!eff) return null as any;
+  const r = eff;
+  const a = r.analysis;
+  const d = r.dossier;
+  const st = r.stats;
+  const analysisMeta = analysisObj;
 
   return (
     <Document>
@@ -228,11 +240,11 @@ export function AnalysisReport({ entity, result, range, pageCount }: { entity: s
         </View>
 
         <View style={{ marginBottom: 2 }}>
-          <Text style={s.coverCategory}>{d?.identity.category ?? 'Entity Profile'} • {st?.total ?? result.topMentions.length} signals • {rl}</Text>
+          <Text style={s.coverCategory}>{d?.identity.category ?? 'Entity Profile'} • {st?.total ?? r.topMentions.length} signals • {rl}</Text>
           <Text style={s.coverTitle}>{d?.identity.displayName ?? entity}</Text>
           {d?.identity.aliases?.length ? <Text style={[s.small, { marginTop: 4 }]}>Also known as — {d.identity.aliases.join(' • ')}</Text> : null}
           <View style={{ marginTop: 10 }}>
-            <Para>{a?.executiveSummary ?? d?.mediaSentiment.narrative ?? `PR health is ${result.label} at ${result.compositeScore}/100 over ${rl}. This briefing synthesizes media quality, sentiment, share of voice and social signals into a concise, evidence-linked assessment.`}</Para>
+            <Para>{a?.executiveSummary ?? d?.mediaSentiment.narrative ?? `PR health is ${r.label} at ${r.compositeScore}/100 over ${rl}. This briefing synthesizes media quality, sentiment, share of voice and social signals into a concise, evidence-linked assessment.`}</Para>
           </View>
           {d?.identity.bio ? (
             <View style={{ marginTop: 4, paddingLeft: 10, borderLeft: `2 solid ${BORDER}` }}>
@@ -244,8 +256,8 @@ export function AnalysisReport({ entity, result, range, pageCount }: { entity: s
         <View style={s.scoreRow}>
           <View style={{ flex: 1 }}>
             <View style={s.scoreMain}>
-              <Text style={[s.scoreNum, { color: lc(result.label) }]}>{result.compositeScore}</Text>
-              <Text style={[s.scoreLabel, { color: lc(result.label) }]}>{result.label}</Text>
+              <Text style={[s.scoreNum, { color: lc(r.label) }]}>{r.compositeScore}</Text>
+              <Text style={[s.scoreLabel, { color: lc(r.label) }]}>{r.label}</Text>
               <Text style={s.scoreMeta}>/ 100 • {rl}</Text>
             </View>
             <Text style={[s.small, { marginTop: 4 }]}>Composite — weighted sentiment 40% • volume 20% • trend 20% • authority 20%</Text>
@@ -253,17 +265,17 @@ export function AnalysisReport({ entity, result, range, pageCount }: { entity: s
           <View style={{ width: 108, alignItems: 'flex-end' }}>
             <Text style={[s.small, { fontFamily: 'Helvetica-Bold', color: INK }]}>Overall Health</Text>
             <View style={{ width: 108, height: 4, backgroundColor: '#e5e7eb', borderRadius: 2, marginTop: 6, overflow: 'hidden' }}>
-              <View style={{ width: `${result.compositeScore}%`, height: 4, backgroundColor: lc(result.label) }} />
+              <View style={{ width: `${r.compositeScore}%`, height: 4, backgroundColor: lc(r.label) }} />
             </View>
           </View>
         </View>
 
         <View style={s.metricGrid}>
           {[
-            { k: 'Sentiment', v: result.breakdown.sentimentScore, sub: 'weighted' },
-            { k: 'Volume', v: result.breakdown.volumeScore, sub: `vs baseline` },
-            { k: 'Trend', v: result.breakdown.trendScore, sub: 'momentum' },
-            { k: 'Authority', v: result.breakdown.authorityWeight, sub: 'tier mix' },
+            { k: 'Sentiment', v: r.breakdown.sentimentScore, sub: 'weighted' },
+            { k: 'Volume', v: r.breakdown.volumeScore, sub: `vs baseline` },
+            { k: 'Trend', v: r.breakdown.trendScore, sub: 'momentum' },
+            { k: 'Authority', v: r.breakdown.authorityWeight, sub: 'tier mix' },
           ].map((m) => (
             <View key={m.k} style={{ flex: 1 }}>
               <Text style={s.metricLabel}>{m.k}</Text>
@@ -331,7 +343,7 @@ export function AnalysisReport({ entity, result, range, pageCount }: { entity: s
             <Para>{d?.mediaSentiment.narrative ?? a?.sentimentNarrative ?? 'Sentiment narrative synthesizes tier-weighted headline classifications.'}</Para>
           </Sub>
           <Sub title="Share of voice">
-            <Para>{d?.mediaSOV.volumeNote ?? `Volume score ${result.breakdown.volumeScore}/100 versus baseline (1d:5 • 7d:20 • 15d:35 • 30d:50).`}</Para>
+            <Para>{d?.mediaSOV.volumeNote ?? `Volume score ${r.breakdown.volumeScore}/100 versus baseline (1d:5 • 7d:20 • 15d:35 • 30d:50).`}</Para>
             {d?.mediaSOV.estimatedSOV ? (
               <View style={s.kvRow}><Text style={s.kvKey}>Est. SOV</Text><View style={{ flex: 1 }}><Inline text={d.mediaSOV.estimatedSOV} style={s.kvValMuted} /></View></View>
             ) : null}
@@ -345,7 +357,7 @@ export function AnalysisReport({ entity, result, range, pageCount }: { entity: s
                 <Text style={[s.th, { width: 36, textAlign: 'center' as const }]}>Tier</Text>
                 <Text style={[s.th, { width: 56, textAlign: 'right' as const }]}>Date</Text>
               </View>
-              {result.topMentions.slice(0, 8).map((m, i) => (
+              {r.topMentions.slice(0, 8).map((m, i) => (
                 <View key={i} style={[s.tr, i % 2 === 1 ? s.trAlt : {}]} wrap>
                   <Text style={[s.tdSmallLeft, { width: 16, paddingTop: 1 }]}>{i + 1}</Text>
                   <View style={{ flex: 1, minWidth: 0, paddingRight: 6, flexDirection: 'column' as any }}>
@@ -360,7 +372,7 @@ export function AnalysisReport({ entity, result, range, pageCount }: { entity: s
                 </View>
               ))}
             </View>
-            {result.topMentions.length > 8 ? <Text style={s.small}>{result.topMentions.length - 8} additional mentions in evidence section.</Text> : null}
+            {r.topMentions.length > 8 ? <Text style={s.small}>{r.topMentions.length - 8} additional mentions in evidence section.</Text> : null}
           </Sub>
         </Section>
 
@@ -525,7 +537,7 @@ export function AnalysisReport({ entity, result, range, pageCount }: { entity: s
           </View>
         </Section>
 
-        <Section title="Evidence — Sources" subtitle={`${result.topMentions.length} records • all URLs validated and clickable`}>
+        <Section title="Evidence — Sources" subtitle={`${r.topMentions.length} records • all URLs validated and clickable`}>
           <View style={s.tableWrap}>
             <View style={s.tableHead}>
               <Text style={[s.th, { width: 16 }]}>#</Text>
@@ -534,7 +546,7 @@ export function AnalysisReport({ entity, result, range, pageCount }: { entity: s
               <Text style={[s.th, { width: 36, textAlign: 'center' as const }]}>Tier</Text>
               <Text style={[s.th, { width: 56, textAlign: 'right' as const }]}>Date</Text>
             </View>
-            {result.topMentions.map((m, i) => (
+            {r.topMentions.map((m, i) => (
               <View key={i} style={[s.tr, i % 2 === 1 ? s.trAlt : {}]} wrap>
                 <Text style={[s.tdSmallLeft, { width: 16, paddingTop: 1 }]}>{i + 1}</Text>
                 <View style={{ flex: 1, minWidth: 0, paddingRight: 6, flexDirection: 'column' as any }}>
@@ -549,7 +561,7 @@ export function AnalysisReport({ entity, result, range, pageCount }: { entity: s
               </View>
             ))}
           </View>
-          {result.topMentions.length === 0 ? <Text style={s.small}>No mentions surfaced for this range. Try a broader window (7d or 30d).</Text> : null}
+          {r.topMentions.length === 0 ? <Text style={s.small}>No mentions surfaced for this range. Try a broader window (7d or 30d).</Text> : null}
         </Section>
 
         <View style={s.footer} fixed>

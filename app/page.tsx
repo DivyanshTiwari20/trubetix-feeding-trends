@@ -102,13 +102,24 @@ export default function Home() {
     },
   } as any);
 
-  const { messages, sendMessage, status, setMessages, addToolResult, addToolOutput, error } = chat as any;
+  const { messages, sendMessage, status, setMessages, addToolOutput, error } = chat as any;
 
   const isLoading = status === 'streaming' || status === 'submitted';
+
+  const handleToolConfirm = async (toolCallId: string, result: any) => {
+    try {
+      await (addToolOutput as any)?.({ toolCallId, output: result });
+    } catch (e) {
+      console.error('addToolOutput error:', e);
+    }
+  };
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'instant' as any });
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
   }, [messages, isLoading]);
 
   useEffect(() => {
@@ -129,9 +140,7 @@ export default function Home() {
     if (pending) {
       const toolCallId = pending.toolCallId;
       const cancelPayload = { entities: pending.input?.entities ?? pending.args?.entities ?? [], range: pending.input?.range ?? pending.args?.range ?? '7d', cancelled: true };
-      try { (addToolOutput as any)?.({ toolCallId, output: cancelPayload }); } catch { }
-      try { (addToolResult as any)?.({ toolCallId, result: cancelPayload }); } catch { }
-      try { (addToolResult as any)?.(toolCallId, cancelPayload); } catch { }
+      void handleToolConfirm(toolCallId, cancelPayload);
     }
     sendMessage({ text: input });
     setInput('');
@@ -189,7 +198,7 @@ export default function Home() {
         <div className="flex flex-1 flex-col overflow-hidden bg-white">
           <AppHeader sidebarOpen={sidebarOpen} onOpenSidebar={() => setSidebarOpen(true)} />
           <div className="flex flex-1 flex-col overflow-hidden">
-            <div className="flex-1 overflow-y-auto bg-white">
+            <div ref={scrollRef} className="flex-1 overflow-y-auto bg-white min-h-0">
               {error && (
                 <div className="mx-auto max-w-[780px] px-4 pt-4">
                   <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
@@ -215,15 +224,7 @@ export default function Home() {
                       key={m.id}
                       message={m as any}
                       isLoading={isLoading && idx === messages.length - 1}
-                      addToolResult={(toolCallId: string, result: any) => {
-                        try {
-                          try { (addToolOutput as any)?.({ toolCallId, output: result }); } catch { }
-                          try { (addToolResult as any)?.({ toolCallId, result }); } catch { }
-                          try { (addToolResult as any)?.({ toolCallId, output: result }); } catch { }
-                        } catch (e) {
-                          console.error('addToolResult error:', e);
-                        }
-                      }}
+                      addToolResult={handleToolConfirm}
                     />
                   ))}
                   {(isLoading || showExtendedThinking) && (
@@ -232,12 +233,11 @@ export default function Home() {
                       {deepThinking || showExtendedThinking ? 'Thinking deeper...' : 'Thinking...'}
                     </div>
                   )}
-                  <div ref={bottomRef} />
                 </div>
               )}
             </div>
             {messages.length > 0 && (
-              <div className="bg-white p-4">
+              <div className="bg-white p-4 border-t">
                 <ChatInput value={input} onChange={setInput} onSubmit={handleSubmit} isLoading={isLoading} variant="compact" deepThinking={deepThinking} onDeepThinkingChange={setDeepThinking} />
               </div>
             )}

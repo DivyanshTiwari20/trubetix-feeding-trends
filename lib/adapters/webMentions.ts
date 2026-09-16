@@ -2,14 +2,8 @@ import { z } from 'zod';
 import { SignalAdapter, AdapterResult, NormalizedMention } from '../types';
 import { generateText } from 'ai';
 import { google } from '@/lib/google';
-
-export const SOCIAL_PLATFORMS = [
-  { id: 'reddit', label: 'Reddit', site: 'reddit.com' },
-  { id: 'twitter', label: 'X/Twitter', site: 'x.com' },
-  { id: 'instagram', label: 'Instagram', site: 'instagram.com' },
-  { id: 'youtube', label: 'YouTube', site: 'youtube.com' },
-  { id: 'linkedin', label: 'LinkedIn', site: 'linkedin.com' },
-] as const;
+import { SOCIAL_PLATFORMS } from '@/lib/config/platforms';
+export { SOCIAL_PLATFORMS } from '@/lib/config/platforms';
 
 const serperResultSchema = z.object({
   title: z.string().min(1),
@@ -49,12 +43,12 @@ function parsePublishedAt(displayedLink?: string, date?: string): string {
   return new Date().toISOString();
 }
 
-async function fetchViaSerper(q: string, tbs: string, key: string): Promise<{ organic: any[]; searchInformation?: any; ok: boolean; status: number }> {
+async function fetchViaSerper(q: string, tbs: string, key: string, page: number = 1): Promise<{ organic: any[]; searchInformation?: any; ok: boolean; status: number }> {
   try {
     const res = await fetch('https://google.serper.dev/search', {
       method: 'POST',
       headers: { 'X-API-KEY': key, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ q, tbs, num: 10 }),
+      body: JSON.stringify({ q, tbs, num: 10, page }),
     });
     if (!res.ok) return { organic: [], ok: false, status: res.status };
     const data = await res.json();
@@ -90,8 +84,8 @@ async function fetchViaSerpApi(q: string, tbs: string, key: string): Promise<{ o
 async function fetchViaGemini(q: string, range: string): Promise<{ organic: any[]; searchInformation?: any }> {
   try {
     const res: any = await generateText({
-      model: google('models/gemini-2.5-flash'),
-      providerOptions: { google: { useSearchGrounding: true, thinkingConfig: { includeThoughts: false, thinkingBudget: 0 } } } as any,
+      model: google('models/gemini-3.5-flash-lite'),
+      providerOptions: { google: { useSearchGrounding: true } } as any,
       prompt: `Search Google for: ${q} from past ${range}. Return 8 real results with title, url, snippet, published date.`,
     });
     const chunks: any[] = res.providerMetadata?.google?.groundingMetadata?.groundingChunks ?? (res as any).groundingMetadata?.groundingChunks ?? [];
@@ -116,37 +110,36 @@ async function fetchViaGemini(q: string, range: string): Promise<{ organic: any[
 async function fetchSingleQuery(q: string, range: string): Promise<{ mentions: NormalizedMention[]; searchInformation?: { totalResults?: number }; error?: string }> {
   const tbs = rangeTbs(range);
   const key = getSearchKey();
-
   let organic: any[] = [];
   let searchInformation: any = undefined;
 
   if (key) {
-    let r = await fetchViaSerper(q, tbs, key);
+    const r = await fetchViaSerper(q, tbs, key, 1);
     if (!r.ok && (r.status === 403 || r.status === 401)) {
-      r = await fetchViaSerpApi(q, tbs, key);
-    }
-    if (r.ok && r.organic.length > 0) {
-      organic = r.organic;
+      const fb = await fetchViaSerpApi(q, tbs, key);
+      organic = fb.organic;
+      searchInformation = fb.searchInformation;
+    } else if (r.ok) {
+      organic = [...r.organic];
       searchInformation = r.searchInformation;
-    } else if (!r.ok && r.status !== 0) {
-      const fb = await fetchViaSerpApi(q, tbs, key);
-      if (fb.ok) {
-        organic = fb.organic;
-        searchInformation = fb.searchInformation;
-      } else {
-        const g = await fetchViaGemini(q, range);
-        organic = g.organic;
-        searchInformation = g.searchInformation;
-        if (organic.length === 0) return { mentions: [], searchInformation, error: `Search temporarily unavailable (provider ${r.status}). Retried via fallback.` };
+      const tr = searchInformation?.totalResults ? parseInt(String(searchInformation.totalResults).replace(/[^0-9]/g, ''), 10) : 0;
+      const pages = tr > 500 ? 10 : tr > 200 ? 7 : tr > 100 ? 5 : tr > 50 ? 4 : tr > 15 ? 3 : tr > 8 ? 2 : 1;
+      if (pages > 1 && organic.length >= 6) {
+        const pageNums = Array.from({length: pages-1}, (_,i)=> i+2);
+        const extras = await Promise.all(pageNums.map(p=> fetchViaSerper(q, tbs, key, p)));
+        for (const e of extras) if (e.ok && e.organic.length) { organic = organic.concat(e.organic); if (!searchInformation?.totalResults && e.searchInformation?.totalResults) searchInformation = e.searchInformation; }
       }
-    } else if (r.ok && r.organic.length === 0) {
+      if (organic.length === 0) {
+        const fb = await fetchViaSerpApi(q, tbs, key);
+        if (fb.ok && fb.organic.length) { organic = fb.organic; searchInformation = fb.searchInformation; }
+      }
+    } else {
       const fb = await fetchViaSerpApi(q, tbs, key);
-      if (fb.ok && fb.organic.length > 0) {
-        organic = fb.organic;
-        searchInformation = fb.searchInformation;
-      } else {
-        organic = r.organic;
-        searchInformation = r.searchInformation;
+      if (fb.ok) { organic = fb.organic; searchInformation = fb.searchInformation; }
+      else {
+        const g = await fetchViaGemini(q, range);
+        organic = g.organic; searchInformation = g.searchInformation;
+        if (!organic.length) return { mentions: [], searchInformation, error: `Search unavailable (${r.status})` };
       }
     }
   } else {
@@ -154,7 +147,7 @@ async function fetchSingleQuery(q: string, range: string): Promise<{ mentions: N
     organic = g.organic;
     searchInformation = g.searchInformation;
   }
-
+  if (!organic) organic = [];
   const mentions: NormalizedMention[] = [];
   for (const item of organic) {
     const parsed = serperResultSchema.safeParse(item);
