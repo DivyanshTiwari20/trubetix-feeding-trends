@@ -2,6 +2,7 @@
 
 import { PanelLeft, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { AgentToggle } from '@/components/chat/AgentToggle';
 
 interface AppHeaderProps {
   sidebarOpen: boolean;
@@ -24,6 +25,7 @@ export function AppHeader({ sidebarOpen, onOpenSidebar }: AppHeaderProps) {
         )}
       </div>
       <div className="flex items-center gap-2">
+        <AgentToggle />
         <Button
           variant="outline"
           size="sm"

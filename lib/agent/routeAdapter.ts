@@ -2,10 +2,8 @@ import { createUIMessageStream, createUIMessageStreamResponse } from 'ai';
 import { prisma } from '../db';
 import { runAgent } from './controller';
 
-export function isAgentEnabled(): boolean {
-  const v = (process.env.AGENT_ENABLED ?? 'off').toLowerCase();
-  return v === 'on' || v === '1' || v === 'true';
-}
+// Single source of truth for the flag (env + UI-toggle runtime override).
+export { isAgentEnabled, setAgentRuntimeOverride, agentFlagSource } from './flag';
 
 function getText(m: { parts?: { type?: string; text?: string }[]; content?: unknown }): string {
   if (m.parts?.length) return m.parts.filter(p => p.type === 'text').map(p => (p.text ?? '')).join('\n');
