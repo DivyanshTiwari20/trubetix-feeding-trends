@@ -1,33 +1,98 @@
 'use client';
 import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { ExternalLink, Heart, MessageCircle, Eye, Share2 } from 'lucide-react';
+import { ExternalLink } from 'lucide-react';
 import type { NormalizedMention } from '@/lib/types';
-function fmt(n: number|null|undefined){ if(n==null) return '—'; if(n>=1000000) return `${(n/1000000).toFixed(1)}M`; if(n>=1000) return `${(n/1000).toFixed(1)}K`; return String(n); }
+
+function fmtCompact(n: number | null | undefined): string | null {
+  if (n == null) return null;
+  if (n >= 1000000) return `${parseFloat((n / 1000000).toFixed(1))}M`;
+  if (n >= 1000) return `${parseFloat((n / 1000).toFixed(1))}K`;
+  return String(n);
+}
+
+function thumbnailFromRaw(raw: unknown): string | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  const candidates = [r.imageUrl, r.thumbnail, r.image, r.thumbnailUrl, r.ogImage];
+  for (const c of candidates) {
+    if (typeof c === 'string' && c.startsWith('http')) return c;
+    if (c && typeof c === 'object') {
+      const o = c as Record<string, unknown>;
+      if (typeof o.url === 'string' && o.url.startsWith('http')) return o.url;
+      if (typeof o.src === 'string' && o.src.startsWith('http')) return o.src;
+    }
+  }
+  return null;
+}
+
+function shortUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    const path = u.pathname.length > 28 ? `${u.pathname.slice(0, 28)}…` : u.pathname;
+    return `${u.hostname}${path}`;
+  } catch {
+    return url.slice(0, 48);
+  }
+}
+
 export function SocialPostCard({ post }: { post: NormalizedMention }) {
-  const plat = post.source ?? 'web';
-  const likes = post.engagement?.likes;
-  const comments = post.engagement?.comments;
-  const views = post.engagement?.views;
-  const shares = post.engagement?.shares;
-  const sentTone = post.sentiment==='positive'?'bg-green-100 text-green-700 border-green-200':post.sentiment==='negative'?'bg-red-100 text-red-700 border-red-200':'bg-zinc-100 text-zinc-700';
+  const plat = (post.source ?? 'web').toLowerCase();
+  const platLabel = plat === 'x' ? 'X' : plat.charAt(0).toUpperCase() + plat.slice(1);
+  const likes = fmtCompact(post.engagement?.likes);
+  const date = (() => {
+    try {
+      const d = new Date(post.publishedAt);
+      return isNaN(d.getTime()) ? null : d.toLocaleDateString();
+    } catch {
+      return null;
+    }
+  })();
+  const thumb = thumbnailFromRaw(post.raw);
+  const headerMeta = [platLabel, likes ? `${likes} likes` : null, date].filter(Boolean).join('  ·  ');
+
   return (
-    <Card className="overflow-hidden">
-      <CardContent className="p-4 space-y-3">
-        <div className="flex items-center gap-2 text-xs">
-          <Badge variant="secondary" className="capitalize rounded-full">{plat}</Badge>
-          <span className="text-muted-foreground">{new Date(post.publishedAt).toLocaleDateString()}</span>
-          {post.sentiment ? <Badge variant="outline" className={`ml-auto capitalize ${sentTone}`}>{post.sentiment}</Badge> : null}
+    <Card className="overflow-hidden shadow-sm">
+      <CardContent className="p-4">
+        <div className="flex gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="text-[13px] text-muted-foreground">{headerMeta}</div>
+            <a
+              href={post.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-1 block text-[15px] font-medium leading-6 text-[#1a0dab] hover:underline line-clamp-2"
+            >
+              {post.title || shortUrl(post.url)}
+            </a>
+            {post.engagementSnippet ? (
+              <div className="mt-1 text-[13px] leading-5 text-[#4d5156] line-clamp-2">
+                {post.engagementSnippet.slice(0, 220)}
+              </div>
+            ) : null}
+            <a
+              href={post.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-1.5 flex items-center gap-1 text-xs text-[#202124]"
+            >
+              <span className="truncate">{shortUrl(post.url)}</span>
+              <ExternalLink className="h-3 w-3 shrink-0 text-muted-foreground" />
+            </a>
+          </div>
+          {thumb ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={thumb}
+              alt=""
+              className="h-[72px] w-[96px] shrink-0 rounded-md border object-cover"
+              loading="lazy"
+            />
+          ) : (
+            <div className="flex h-[72px] w-[96px] shrink-0 items-center justify-center rounded-md border bg-muted/40 px-2 text-center text-[11px] text-muted-foreground">
+              No preview
+            </div>
+          )}
         </div>
-        <div className="text-sm font-medium leading-6 line-clamp-3">{post.title}</div>
-        {post.engagementSnippet ? <div className="text-xs text-muted-foreground line-clamp-2">{post.engagementSnippet.slice(0,180)}</div> : null}
-        <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
-          <span className="inline-flex items-center gap-1"><Heart className="h-3.5 w-3.5" />{fmt(likes)}</span>
-          <span className="inline-flex items-center gap-1"><MessageCircle className="h-3.5 w-3.5" />{fmt(comments)}</span>
-          <span className="inline-flex items-center gap-1"><Eye className="h-3.5 w-3.5" />{fmt(views)}</span>
-          <span className="inline-flex items-center gap-1"><Share2 className="h-3.5 w-3.5" />{fmt(shares)}</span>
-        </div>
-        <a href={post.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-[#7C3AED] hover:underline">Open source <ExternalLink className="h-3 w-3" /></a>
       </CardContent>
     </Card>
   );

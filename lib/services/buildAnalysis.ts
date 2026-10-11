@@ -116,6 +116,17 @@ export async function buildAnalysis(entity: string, range: '1d'|'7d'|'15d'|'30d'
   const needsAudience = resolved.needsAudienceSources;
   const audienceSynthesis = needsAudience ? brief.publicConversation : null;
 
+  const rankedMentions = [...mentions].sort((a, b) => {
+    const aLikes = a.engagement?.likes ?? -1;
+    const bLikes = b.engagement?.likes ?? -1;
+    if (bLikes !== aLikes) return bLikes - aLikes;
+    const aComments = a.engagement?.comments ?? -1;
+    const bComments = b.engagement?.comments ?? -1;
+    if (bComments !== aComments) return bComments - aComments;
+    const at = Date.parse(a.publishedAt ?? '') || 0;
+    const bt = Date.parse(b.publishedAt ?? '') || 0;
+    return bt - at;
+  });
   const analysis: Analysis = {
     id: `${effectiveEntity.toLowerCase().replace(/\s+/g,'-')}-${range}-${Date.now()}`,
     entity: effectiveEntity,
@@ -134,7 +145,7 @@ export async function buildAnalysis(entity: string, range: '1d'|'7d'|'15d'|'30d'
     risks,
     recommendations: brief.brandFit?.considerations ?? [],
     platformsData: metrics.mentionsByPlatform,
-    topMentions: mentions.slice(0, 12),
+    topMentions: rankedMentions.slice(0, 12),
     topStories: mentions.filter(m=>m.source==='news').slice(0, 5),
     visualizations: [],
     dataQuality: { coverage: collected.dataQuality.coverage, indexedCount: collected.indexedResultCount, confidence: collected.dataQuality.confidence as any, limitations: collected.dataQuality.limitations },
@@ -148,7 +159,7 @@ export async function buildAnalysis(entity: string, range: '1d'|'7d'|'15d'|'30d'
     publishedCount: collected.publishedCount,
     indexedResultCount: collected.indexedResultCount,
     totalEstimatedPosts: collected.totalEstimatedPosts,
-    analyzedContentCount: collected.totalEstimatedPosts ?? collected.analyzedContentCount,
+    analyzedContentCount: collected.analyzedContentCount,
     thirdPartyMentionCount: collected.thirdPartyMentionCount,
     coverage: { status: coverageStatus, confidence: collected.publishedCount.confidence, methodology: collected.publishedCount.methodology },
     normalizedContents: collected.content,

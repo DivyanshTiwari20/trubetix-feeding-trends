@@ -1,8 +1,18 @@
 'use client';
-import type { Analysis } from '@/lib/types';
+import type { Analysis, NormalizedMention } from '@/lib/types';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { VisualizationRenderer } from './VisualizationRenderer';
+import { SocialPostCard } from './SocialPostCard';
+
+function wantsAllPosts(q?: string): { all: boolean; topN: number | null } {
+  if (!q) return { all: false, topN: null };
+  const all = /show\s+(me\s+)?all|list\s+all|all\s+(the\s+)?posts?|all\s+(the\s+)?posters?|every\s+post/i.test(q);
+  const m = q.toLowerCase().match(/top\s+(\d{1,4})\b/);
+  const topN = m ? Math.min(1000, parseInt(m[1], 10)) : null;
+  const wantsTop = /top\s+\d*\s*(posts?|posters?|reels?|tweets?|videos?)/i.test(q);
+  return { all: all || (topN != null && topN > 12) || wantsTop, topN };
+}
 
 function fmt(n:number|null){ if(n==null) return '—'; if(n>=1000000){ const v=(n/1000000).toFixed(n%1000000===0?0:1); return `${parseFloat(v)}M`; } if(n>=1000){ const v=(n/1000).toFixed(n%1000===0?0:1); return `${parseFloat(v)}K`; } return String(n); }
 
@@ -17,6 +27,74 @@ export function QuestionBriefView({ analysis }: { analysis: Analysis }) {
   const totalLikes = analysis.engagementSummary?.totalLikes;
   const hasLikes = totalLikes != null;
   const platformLabel = analysis.platforms.join(', ');
+  const singlePlatform = analysis.platforms.length === 1 ? analysis.platforms[0].toLowerCase() : null;
+  const isSingleSocial = singlePlatform && ['instagram', 'x', 'twitter', 'reddit', 'youtube', 'linkedin'].includes(singlePlatform);
+  const displayPlatform = singlePlatform === 'twitter' ? 'x' : singlePlatform;
+  const listReq = wantsAllPosts(analysis.question);
+  const isPostsOnly = listReq.all;
+  const allContents = analysis.normalizedContents ?? [];
+  const topThree: NormalizedMention[] = (analysis.topMentions ?? []).slice(0, 3);
+  const allAsMentions: NormalizedMention[] = allContents.map((c) => ({
+    source: c.platform,
+    title: c.title ?? '',
+    url: c.url,
+    publishedAt: c.publishedAt ?? new Date().toISOString(),
+    sentiment: c.sentiment as NormalizedMention['sentiment'],
+    engagementSnippet: c.snippet,
+    engagement: {
+      raw: c.snippet ?? null,
+      likes: c.engagement.likes,
+      comments: c.engagement.comments,
+      shares: c.engagement.shares,
+      views: c.engagement.views,
+      confidence: c.engagement.confidence,
+      source: c.engagement.source === 'parsed' ? 'snippet' : 'none',
+    },
+    raw: (c.raw as Record<string, unknown>) ?? {},
+  }));
+
+  if (isPostsOnly) {
+    return (
+      <div className="w-full max-w-[760px] space-y-5">
+        <div className="flex items-center gap-2">
+          <Badge variant="secondary" className="capitalize">{platformLabel}</Badge>
+          <Badge variant="outline">{analysis.range}</Badge>
+          <span className="text-xs text-muted-foreground">· {analysis.entity}</span>
+        </div>
+
+        <Card className="border-0 shadow-sm bg-gradient-to-br from-[#F8F7FF] to-white overflow-hidden">
+          <CardContent className="p-0">
+            <div className="px-6 py-5">
+              <div className="text-[11px] tracking-widest uppercase font-semibold text-[#7C3AED]">Total posts · {analysis.entity} · {platformLabel} · {analysis.range}</div>
+              <div className="mt-3 flex items-baseline gap-3">
+                <span className="text-4xl font-bold tracking-tight text-[#111827]">{fmt(totalPosts)}</span>
+                <span className="text-sm text-muted-foreground">posts</span>
+                {hasLikes && <span className="ml-4 text-sm"><span className="text-muted-foreground">·</span> <span className="font-semibold">{fmt(totalLikes)}</span> <span className="text-muted-foreground">likes</span></span>}
+              </div>
+            </div>
+            <div className="px-6 pb-5">
+              <p className="text-[15px] leading-7 text-[#1F2937]">{brief.directAnswer}</p>
+            </div>
+          </CardContent>
+        </Card>
+
+        {allAsMentions.length > 0 && (
+          <section>
+            <div className="grid gap-3 mt-1">
+              {[...allAsMentions]
+                .sort((a, b) => (b.engagement?.likes ?? -1) - (a.engagement?.likes ?? -1))
+                .map((m, i) => (
+                  <SocialPostCard key={`${m.url}-${i}`} post={m} />
+                ))}
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-3">
+              Showing all {allAsMentions.length} fetched posts for this entity + range.
+            </p>
+          </section>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="w-full max-w-[760px] space-y-6">
@@ -44,6 +122,22 @@ export function QuestionBriefView({ analysis }: { analysis: Analysis }) {
           </div>
         </CardContent>
       </Card>
+
+      {!isPostsOnly && isSingleSocial && topThree.length > 0 && (
+        <section>
+          <h3 className="text-[18px] font-bold tracking-tight text-[#111827] capitalize">
+            Top {topThree.length} on {displayPlatform}
+          </h3>
+          <p className="text-xs text-muted-foreground mt-1">
+            Highest-engagement discovered posts for {analysis.entity} on {displayPlatform} · {analysis.range}
+          </p>
+          <div className="grid gap-3 mt-3">
+            {topThree.map((m, i) => (
+              <SocialPostCard key={`${m.url}-${i}`} post={m} />
+            ))}
+          </div>
+        </section>
+      )}
 
       {analysis.trend && Object.keys(analysis.trend.postsByDay).length >= 2 && (
         <section>

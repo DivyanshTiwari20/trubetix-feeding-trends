@@ -27,9 +27,20 @@ export interface ResolvedQuestion {
   wantsBrandFit: boolean;
   wantsComparison: boolean;
   wantsEngagement: boolean;
+  wantsAllPosts: boolean;
+  topN: number | null;
   needsAudienceSources: boolean;
   output: 'brief' | 'chat';
   originalQuestion: string;
+}
+
+function detectListRequest(userText: string): { wantsAllPosts: boolean; topN: number | null } {
+  const q = userText.toLowerCase();
+  const wantsAll = /show\s+(me\s+)?all|list\s+all|all\s+(the\s+)?posts?|all\s+(the\s+)?posters?|every\s+post/i.test(userText);
+  const topMatch = q.match(/top\s+(\d{1,4})\b/);
+  const topN = topMatch ? Math.min(1000, parseInt(topMatch[1], 10)) : null;
+  const wantsTopPosts = /top\s+\d*\s*(posts?|posters?|reels?|tweets?|videos?)/i.test(userText);
+  return { wantsAllPosts: wantsAll || (topN != null && topN > 12) || wantsTopPosts, topN };
 }
 
 const schema = z.object({
@@ -80,6 +91,7 @@ Return JSON.`,
     const wantsComparison = intents.includes('comparison') || entities.length > 1;
     const wantsEngagement = intents.includes('engagement');
     const needsAudienceSources = wantsPublicConversation || wantsBrandFit || wantsNarrative;
+    const listReq = detectListRequest(userText);
     return {
       entity: entities[0] ?? null,
       entities,
@@ -94,12 +106,15 @@ Return JSON.`,
       wantsBrandFit,
       wantsComparison,
       wantsEngagement,
+      wantsAllPosts: listReq.wantsAllPosts,
+      topN: listReq.topN,
       needsAudienceSources,
       output: 'brief',
       originalQuestion: userText,
     };
   } catch {
     const fallbackEntity = context?.entity ?? null;
+    const listReq = detectListRequest(userText);
     return {
       entity: fallbackEntity,
       entities: fallbackEntity ? [fallbackEntity] : [],
@@ -114,6 +129,8 @@ Return JSON.`,
       wantsBrandFit: /brand fit|good fit|collab|sponsor/i.test(userText),
       wantsComparison: /compare|vs\b|versus/i.test(userText),
       wantsEngagement: /likes|views|engagement|comments/i.test(userText),
+      wantsAllPosts: listReq.wantsAllPosts,
+      topN: listReq.topN,
       needsAudienceSources: false,
       output: 'brief',
       originalQuestion: userText,

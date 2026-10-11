@@ -48,7 +48,7 @@ async function fetchViaSerper(q: string, tbs: string, key: string, page: number 
     const res = await fetch('https://google.serper.dev/search', {
       method: 'POST',
       headers: { 'X-API-KEY': key, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ q, tbs, num: 10, page }),
+      body: JSON.stringify({ q, tbs, num: 20, page }),
     });
     if (!res.ok) return { organic: [], ok: false, status: res.status };
     const data = await res.json();
@@ -60,7 +60,7 @@ async function fetchViaSerper(q: string, tbs: string, key: string, page: number 
 
 async function fetchViaSerpApi(q: string, tbs: string, key: string): Promise<{ organic: any[]; searchInformation?: any; ok: boolean; status: number }> {
   try {
-    const url = `https://serpapi.com/search.json?engine=google&q=${encodeURIComponent(q)}&api_key=${key}&num=10&tbs=${encodeURIComponent(tbs)}`;
+    const url = `https://serpapi.com/search.json?engine=google&q=${encodeURIComponent(q)}&api_key=${key}&num=20&tbs=${encodeURIComponent(tbs)}`;
     const res = await fetch(url);
     if (!res.ok) return { organic: [], ok: false, status: res.status };
     const data = await res.json();
@@ -123,8 +123,8 @@ async function fetchSingleQuery(q: string, range: string): Promise<{ mentions: N
       organic = [...r.organic];
       searchInformation = r.searchInformation;
       const tr = searchInformation?.totalResults ? parseInt(String(searchInformation.totalResults).replace(/[^0-9]/g, ''), 10) : 0;
-      const pages = tr > 500 ? 10 : tr > 200 ? 7 : tr > 100 ? 5 : tr > 50 ? 4 : tr > 15 ? 3 : tr > 8 ? 2 : 1;
-      if (pages > 1 && organic.length >= 6) {
+      const pages = tr > 500 ? 10 : tr > 200 ? 7 : tr > 100 ? 5 : tr > 50 ? 4 : tr > 15 ? 3 : tr > 8 ? 2 : (organic.length >= 8 ? 5 : 1);
+      if (pages > 1 && organic.length >= 8) {
         const pageNums = Array.from({length: pages-1}, (_,i)=> i+2);
         const extras = await Promise.all(pageNums.map(p=> fetchViaSerper(q, tbs, key, p)));
         for (const e of extras) if (e.ok && e.organic.length) { organic = organic.concat(e.organic); if (!searchInformation?.totalResults && e.searchInformation?.totalResults) searchInformation = e.searchInformation; }

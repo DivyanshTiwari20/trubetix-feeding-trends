@@ -31,6 +31,8 @@ RULES:
 - Comparison: 1 paragraph side-by-side totals, no evidence.
 - Sentiment / "what are people saying": Use Reddit/X evidence primarily. News only if requested. Summarize sentiment + public conversation concisely.
 - After execute_pipeline, DO NOT regenerate a verbose report — just repeat the brief.directAnswer verbatim in your final text. Do NOT add Direct Answer / Total Posts / Supporting Evidence sections.
+- Follow-up list requests ("show me all posts", "show links", "top posts"): inherit entity/platforms/range from conversation history, call execute_pipeline with those + question set to the user's exact message text. NEVER list post titles, likes, or links from memory — the UI cards render from pipeline output. A text-only list without a tool call is always wrong here.
+- Your ONLY data tool is execute_pipeline (plus get_cached_analysis/search_news/compare_periods where relevant). Fetch everything through it — it collects, ranks, and renders post cards with links automatically.
 LEANNESS: Nothing extra beyond what user asked. Methodology collapsed to zero — totals are search totalResults estimate.
 TRUTH: Never invent. Null likes = hide likes line.`;
 
@@ -193,6 +195,26 @@ async function persistIncomingMessages(chatId: string, messages: any[]) {
   } catch (e) { console.error('persistIncomingMessages error', e); }
 }
 
+function extractLastPipelineContext(messages: any[]): { entities: string[]; range?: string; platforms?: string[] } {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const parts = messages[i]?.parts ?? [];
+    for (const p of parts) {
+      const t = String(p?.type ?? '');
+      if (t !== 'tool-execute_pipeline' && t !== 'tool-ask_user_for_confirmation') continue;
+      if (p.state === 'output-available' && p.output && !p.output.cancelled) {
+        const o = p.output;
+        const entities: string[] = o.entities ?? (o.analyses?.map((a: any) => a.entity).filter(Boolean) ?? []);
+        if (entities.length) return { entities, range: o.range, platforms: o.platforms };
+      }
+      const inp = p.input ?? p.args;
+      if ((p.state === 'call' || p.state === 'input-available') && inp?.entities?.length) {
+        return { entities: inp.entities, range: inp.range, platforms: inp.platforms };
+      }
+    }
+  }
+  return { entities: [] };
+}
+
 export async function POST(req: Request) {
   const body = await req.json();
   const messages: any[] = body.messages ?? [];
@@ -243,6 +265,16 @@ export async function POST(req: Request) {
         if (rq.platforms.length) classifiedPlatforms = rq.platforms;
         if (rq.range) classifiedRange = rq.range;
       } catch {}
+      // Deterministic carryover: short follow-ups ("show me all posts", "show links")
+      // often come back with no entity/platforms from the classifiers — inherit
+      // from the last pipeline/confirmation in history so tools stay available
+      // and the model re-runs the pipeline instead of answering from memory.
+      const historyCtx = extractLastPipelineContext(messages);
+      if (!classifiedEntities.length && historyCtx.entities.length) classifiedEntities = historyCtx.entities;
+      if ((!classifiedPlatforms || !classifiedPlatforms.length) && historyCtx.platforms?.length) classifiedPlatforms = historyCtx.platforms;
+      if (!classifiedRange && historyCtx.range) classifiedRange = historyCtx.range;
+      const isListFollowUp = /show\s+(me\s+)?all|list\s+all|all\s+(the\s+)?posts?|top\s+\d*\s*(posts?|posters?)|show.*(links?|posts?)|(links?|posts?).*show/i.test(lastUserTextRaw);
+      if (isListFollowUp && classifiedEntities.length && intentHint !== 'pdf_generation') intentHint = 'full_analysis';
       if (intentHint === 'full_analysis' && classifiedEntities.length > 0 && (!classifiedPlatforms || classifiedPlatforms.length === 0)) {
         const lastUserLower = (getTextFromUIMessage(lastUserMsg) || '').toLowerCase();
         const hasPlatformMention = /instagram|insta|x\b|twitter|youtube|reddit|linkedin|news|web|all platforms|overall/i.test(lastUserLower);
@@ -271,10 +303,15 @@ export async function POST(req: Request) {
 
   let selectedTools: Record<string, any> | undefined = undefined;
   const allTools = buildTools();
+  // NOTE: discover_social_posts / search_web_mentions / aggregate_social_metrics are
+  // deliberately NOT exposed to the model. Their outputs render as nothing in the UI,
+  // so the model used to fetch raw mentions and type them out as text-only lists
+  // (no cards, no links). All user-facing data must flow through execute_pipeline,
+  // which renders IntelligenceDashboard cards.
   if (hasPendingTool || intentHint === 'full_analysis') {
-    selectedTools = { execute_pipeline: allTools.execute_pipeline, ask_user_for_confirmation: allTools.ask_user_for_confirmation, discover_social_posts: allTools.discover_social_posts, search_web_mentions: allTools.search_web_mentions, search_news: allTools.search_news, get_cached_analysis: allTools.get_cached_analysis, aggregate_social_metrics: allTools.aggregate_social_metrics, compare_periods: allTools.compare_periods };
+    selectedTools = { execute_pipeline: allTools.execute_pipeline, ask_user_for_confirmation: allTools.ask_user_for_confirmation, search_news: allTools.search_news, get_cached_analysis: allTools.get_cached_analysis, compare_periods: allTools.compare_periods };
   } else if (intentHint === 'volume_query') {
-    selectedTools = { execute_pipeline: allTools.execute_pipeline, discover_social_posts: allTools.discover_social_posts, search_web_mentions: allTools.search_web_mentions, aggregate_social_metrics: allTools.aggregate_social_metrics, get_cached_analysis: allTools.get_cached_analysis };
+    selectedTools = { execute_pipeline: allTools.execute_pipeline, get_cached_analysis: allTools.get_cached_analysis };
   } else if (intentHint === 'casual_chat' || intentHint === 'pdf_generation') {
     selectedTools = hasPendingTool ? { execute_pipeline: allTools.execute_pipeline, ask_user_for_confirmation: allTools.ask_user_for_confirmation } : undefined;
   } else if (intentHint === 'ambiguous') {

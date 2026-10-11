@@ -23,12 +23,12 @@ export function parseEngagement(snippet?: string | null): ParsedEngagement {
   let views: number | null = null;
   let confidence: ParsedEngagement['confidence'] = 'none';
   const patterns: [RegExp, keyof ParsedEngagement][] = [
-    [/([\d,.]+\s*[kmb]?)\s*likes?/i, 'likes'],
-    [/([\d,.]+\s*[kmb]?)\s*comments?/i, 'comments'],
-    [/([\d,.]+\s*[kmb]?)\s*(shares?|reposts?|retweets?)/i, 'shares'],
-    [/([\d,.]+\s*[kmb]?)\s*views?/i, 'views'],
-    [/([\d,.]+\s*[kmb]?)\s*upvotes?/i, 'likes'],
-    [/♥\s*([\d,.]+\s*[kmb]?)/i, 'likes'],
+    [/([\d,.]+\s*[kmb]?)\+?\s*likes?/i, 'likes'],
+    [/([\d,.]+\s*[kmb]?)\+?\s*comments?/i, 'comments'],
+    [/([\d,.]+\s*[kmb]?)\+?\s*(shares?|reposts?|retweets?)/i, 'shares'],
+    [/([\d,.]+\s*[kmb]?)\+?\s*views?/i, 'views'],
+    [/([\d,.]+\s*[kmb]?)\+?\s*upvotes?/i, 'likes'],
+    [/♥\s*([\d,.]+\s*[kmb]?)\+?/i, 'likes'],
   ];
   for (const [re, key] of patterns) {
     const m = cleaned.match(re) ?? lower.match(re);
@@ -41,7 +41,7 @@ export function parseEngagement(snippet?: string | null): ParsedEngagement {
       }
     }
   }
-  const compactFallback = cleaned.match(/([\d,.]+\s*[kmb])\s*[·•|]/i);
+  const compactFallback = cleaned.match(/([\d,.]+\s*[kmb])\+?\s*[·•|]/i);
   if (likes == null && compactFallback) {
     const v = parseCompactNum(compactFallback[1]);
     if (v != null && v >= 10) { likes = v; confidence = 'low'; }
