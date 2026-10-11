@@ -35,8 +35,10 @@ export function parseEngagement(snippet?: string | null): ParsedEngagement {
     if (m) {
       const v = parseCompactNum(m[1]);
       if (v !== null) {
-        const cur = ({ likes, comments, shares, views } as any)[key];
-        if (cur == null || v > cur) ( { likes, comments, shares, views } as any)[key] = v;
+        if (key === 'likes') { if (likes == null || v > likes) likes = v; }
+        else if (key === 'comments') { if (comments == null || v > comments) comments = v; }
+        else if (key === 'shares') { if (shares == null || v > shares) shares = v; }
+        else if (key === 'views') { if (views == null || v > views) views = v; }
         confidence = 'medium';
       }
     }

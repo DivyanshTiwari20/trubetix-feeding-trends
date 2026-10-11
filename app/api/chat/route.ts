@@ -217,6 +217,19 @@ function extractLastPipelineContext(messages: any[]): { entities: string[]; rang
 
 export async function POST(req: Request) {
   const body = await req.json();
+  // --- Agent path (feature-flagged). Legacy pipeline below is unchanged. ---
+  try {
+    const { isAgentEnabled, handleAgentChat } = await import('@/lib/agent/routeAdapter');
+    if (isAgentEnabled()) {
+      try {
+        return await handleAgentChat(req, body);
+      } catch (e) {
+        console.error('agent path failed, falling back to legacy', e);
+      }
+    }
+  } catch (e) {
+    console.error('agent flag check failed, using legacy', e);
+  }
   const messages: any[] = body.messages ?? [];
   let chatId: string | undefined = body.chatId;
   const deepThinking: boolean = !!body.deepThinking;
